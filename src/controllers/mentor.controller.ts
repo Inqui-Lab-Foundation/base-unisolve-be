@@ -155,16 +155,26 @@ export default class MentorController extends BaseController {
             // const current_user = res.locals.user_id; 
             // pagination
             const { page, size, status } = req.query;
-            let condition = status ? { status: { [Op.like]: `%${status}%` } } : null;
+            // let condition = status ? { status: { [Op.like]: `%${status}%` } } : null;
             const { limit, offset } = this.getPagination(page, size);
             const modelClass = await this.loadModel(model).catch(error => {
                 next(error)
             });
             const where: any = {};
             let whereClauseStatusPart: any = {};
+            let boolStatusWhereClauseRequired = false;
             if (paramStatus && (paramStatus in constents.common_status_flags.list)) {
-                whereClauseStatusPart = { "status": paramStatus }
-            }
+                if (paramStatus === 'ALL') {
+                    whereClauseStatusPart = {};
+                    boolStatusWhereClauseRequired = false;
+                } else {
+                    whereClauseStatusPart = { "status": paramStatus };
+                    boolStatusWhereClauseRequired = true;
+                }
+            } else {
+                whereClauseStatusPart = { "status": "ACTIVE" };
+                boolStatusWhereClauseRequired = true;
+            };
             // const getUserIdFromMentorId = await mentor.findOne({
             //     attributes: ["user_id", "created_by"], where: { mentor_id: req.body.mentor_id }
             // });
@@ -174,6 +184,10 @@ export default class MentorController extends BaseController {
             // if (current_user !== getUserIdFromMentorId.getDataValue("user_id")) {
             //     throw forbidden();
             // };
+            let district: any = req.query.district;
+            let whereClauseOfDistrict: any = district && district !== 'All Districts' ?
+                { district: { [Op.like]: req.query.district } } :
+                { district: { [Op.like]: `%%` } }
             if (id) {
                 where[`${this.model}_id`] = req.params.id;
                 data = await this.crudService.findOne(modelClass, {
@@ -226,7 +240,7 @@ export default class MentorController extends BaseController {
                         where: {
                             [Op.and]: [
                                 whereClauseStatusPart,
-                                condition
+                                // condition
                             ]
                         },
                         include: {
@@ -235,14 +249,9 @@ export default class MentorController extends BaseController {
                                 "organization_code",
                                 "organization_name",
                                 "organization_id",
-                                "principal_name",
-                                "principal_mobile",
-                                "principal_email",
-                                "city",
-                                "district",
-                                "state",
-                                "country"
-                            ]
+                                "district"
+                            ], where: whereClauseOfDistrict,
+                            require: false
                         }, limit, offset
                     })
                     const result = this.getPagingData(responseOfFindAndCountAll, page, limit);
@@ -290,7 +299,7 @@ export default class MentorController extends BaseController {
                 throw notFound();
             } else {
                 const mentorData = await this.crudService.update(modelLoaded, payload, { where: where });
-                const userData = await this.crudService.update(user, { username: req.body.username }, { where: { user_id: findMentorDetail.dataValues.user_id } });
+                const userData = await this.crudService.update(user, payload, { where: { user_id: findMentorDetail.dataValues.user_id } });
                 if (!mentorData || !userData) {
                     throw badRequest()
                 }
@@ -556,12 +565,13 @@ export default class MentorController extends BaseController {
     }
     private async resetPassword(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
         try {
-            const { mobile } = req.body;
-            if (!mobile) {
-                throw badRequest(speeches.MOBILE_NUMBER_REQUIRED);
+            const { email } = req.body;
+            if (!email) {
+                throw badRequest(speeches.USER_EMAIL_REQUIRED);
             }
             // req.body['otp'] = 
             const result = await this.authService.mentorResetPassword(req.body);
+            // console.log(result);
             if (!result) {
                 return res.status(404).send(dispatcher(res, null, 'error', speeches.USER_NOT_FOUND));
             } else if (result.error) {
@@ -607,6 +617,7 @@ export default class MentorController extends BaseController {
         let file = req.files.file;
         let Errors: any = [];
         let bulkData: any = [];
+        let requestData: any = [];
         let counter: number = 0;
         let existedEntities: number = 0;
         let dataLength: number;
@@ -630,8 +641,13 @@ export default class MentorController extends BaseController {
                     Errors.push(badRequest('missing fields', data));
                     return;
                 }
+                requestData = data
+                //@ts-ignore
+                if (Object.entries(data)[i][0] === 'email') {
+                    requestData['username'] = Object.entries(data)[i][1];
+                }
             }
-            bulkData.push(data);
+            bulkData.push(requestData);
         })
         //parsing completed
         stream.on('end', async () => {
